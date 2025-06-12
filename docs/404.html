@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/pathfinding-projects.github.io/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Vite + React</title>
+    <script type="module" crossorigin src="/pathfinding-projects.github.io/assets/index-BmGqkZA2.js"></script>
+    <link rel="stylesheet" crossorigin href="/pathfinding-projects.github.io/assets/index-C8bRBOMj.css">
+    <script>
+      // If this is a direct navigation to a sub-path, redirect to the root
+      // with the path preserved in the hash, so client-side routing can pick it up.
+      // Example: /pathfinding-projects.github.io/some/path -> /pathfinding-projects.github.io/#/some/path
+      // Note: Adjust the base path if your repo name is different.
+      const segmentCount = window.location.pathname.split('/').length - 1 - (window.location.pathname.startsWith('/pathfinding-projects.github.io/') ? 1 : 0);
+      if (segmentCount > 1) { // Check if it's a sub-path beyond the base
+        const path = window.location.pathname.replace(/^\/pathfinding-projects.github.io\//, '');
+        window.location.replace(
+          window.location.protocol + '//' +
+          window.location.host +
+          '/pathfinding-projects.github.io/#' + // Your base path
+          path +
+          window.location.search +
+          window.location.hash
+        );
+      }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
