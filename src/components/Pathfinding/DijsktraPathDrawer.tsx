@@ -28,11 +28,11 @@ interface QueueItem extends Point {
   dist: number;
 }
 
-// Utility function to get CSS variables
-const getVar = (name: string) =>
-  getComputedStyle(document.documentElement).getPropertyValue(name);
+function getVar(name: string) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name);
+}
 
-export default function DijkstraPathDrawer({
+export default function DijkstraGridDrawer({
   cols,
   rows,
 }: DijkstraPathDrawerProps) {
@@ -40,7 +40,7 @@ export default function DijkstraPathDrawer({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cellsRef = useRef<Cell[][]>([]);
   const lastPosRef = useRef<Point | null>(null);
-  
+
   // Algorithm state refs
   const distancesRef = useRef<number[][]>([]);
   const visitedRef = useRef<boolean[][]>([]);
@@ -48,10 +48,13 @@ export default function DijkstraPathDrawer({
   const dijkstraQueueRef = useRef<QueueItem[]>([]);
   const dijkstraChunkSizeRef = useRef(1);
   const dijkstraRunningRef = useRef(false);
+  const shortestPathAnimatingRef = useRef(false);
 
   // UI state
   const [isDrawing, setIsDrawing] = useState(false);
-  const [drawingMode, setDrawingMode] = useState<"blocked" | "passage" | "source" | "target">("blocked");
+  const [drawingMode, setDrawingMode] = useState<
+    "blocked" | "passage" | "source" | "target"
+  >("blocked");
   const [source, setSource] = useState<Point | null>(null);
   const [target, setTarget] = useState<Point | null>(null);
   const [dimensions, setDimensions] = useState({
@@ -61,6 +64,8 @@ export default function DijkstraPathDrawer({
   const [dijkstraChunkSize, setDijkstraChunkSize] = useState(1);
   const [dijkstraRunning, setDijkstraRunning] = useState(false);
   const [dijkstraPaused, setDijkstraPaused] = useState(false);
+  const [pathFound, setPathFound] = useState(false);
+  const [pathLength, setPathLength] = useState(0);
 
   /* ==== HELPER FUNCTIONS ==== */
   function isInBounds(x: number, y: number): boolean {
@@ -69,7 +74,7 @@ export default function DijkstraPathDrawer({
 
   function drawCell(x: number, y: number, status: CellStatus): void {
     const ctx = canvasRef.current?.getContext("2d");
-    if (!ctx) return;
+    if (ctx == null) return;
 
     switch (status) {
       case "blocked":
@@ -79,6 +84,8 @@ export default function DijkstraPathDrawer({
         ctx.fillStyle = getVar("--color-base-100");
         break;
       case "frontier":
+        ctx.fillStyle = getVar("--color-primary");
+        break;
       case "visited":
         ctx.fillStyle = getVar("--color-primary");
         break;
@@ -86,7 +93,7 @@ export default function DijkstraPathDrawer({
         ctx.fillStyle = getVar("--color-error");
         break;
       case "target":
-        ctx.fillStyle = getVar("--color-info");
+        ctx.fillStyle = getVar("--color-success");
         break;
       case "shortestPath":
         ctx.fillStyle = getVar("--color-secondary");
@@ -99,7 +106,7 @@ export default function DijkstraPathDrawer({
 
   function getCanvasPosition(x: number, y: number): Point | undefined {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (canvas == null) return;
 
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
@@ -116,7 +123,7 @@ export default function DijkstraPathDrawer({
   /* ==== CANVAS SETUP AND INITIALIZATION ==== */
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (canvas == null) return;
 
     // Setup canvas dimensions
     canvas.width = cols;
@@ -127,11 +134,9 @@ export default function DijkstraPathDrawer({
       Array.from({ length: cols }, () => ({ status: "passage" }))
     );
     cellsRef.current = grid;
-    
+
     // Draw initial state
-    grid.forEach((row, y) => 
-      row.forEach((_, x) => drawCell(x, y, "passage"))
-    );
+    grid.forEach((row, y) => row.forEach((_, x) => drawCell(x, y, "passage")));
 
     // Clear maze on initial setup
     clearMaze();
@@ -142,7 +147,7 @@ export default function DijkstraPathDrawer({
         row.forEach((cell, x) => drawCell(x, y, cell.status))
       );
     });
-    
+
     observer.observe(document.documentElement, {
       attributes: true,
       attributeFilter: ["class", "data-theme"],
@@ -152,10 +157,12 @@ export default function DijkstraPathDrawer({
   }, []);
 
   /* ==== CANVAS EVENT HANDLERS ==== */
-  function handlePointerDown(event: React.PointerEvent<HTMLCanvasElement>): void {
+  function handlePointerDown(
+    event: React.PointerEvent<HTMLCanvasElement>
+  ): void {
     setIsDrawing(true);
     const point = getCanvasPosition(event.clientX, event.clientY);
-    if (!point) return;
+    if (point == null) return;
 
     switch (drawingMode) {
       case "source":
@@ -174,7 +181,7 @@ export default function DijkstraPathDrawer({
         drawCell(point.x, point.y, "source");
         setSource({ x: point.x, y: point.y });
         break;
-        
+
       case "target":
         clearDijkstraResults();
         // Clear any existing target
@@ -191,7 +198,7 @@ export default function DijkstraPathDrawer({
         drawCell(point.x, point.y, "target");
         setTarget({ x: point.x, y: point.y });
         break;
-        
+
       case "blocked":
       case "passage":
         cellsRef.current[point.y][point.x].status = drawingMode;
@@ -201,13 +208,20 @@ export default function DijkstraPathDrawer({
     }
   }
 
-  function handlePointerMove(event: React.PointerEvent<HTMLCanvasElement>): void {
+  function handlePointerMove(
+    event: React.PointerEvent<HTMLCanvasElement>
+  ): void {
     if (!isDrawing) return;
-    
+
     const point = getCanvasPosition(event.clientX, event.clientY);
     const lastPoint = lastPosRef.current;
 
-    if (!point || !lastPoint || drawingMode === "source" || drawingMode === "target") {
+    if (
+      point == null ||
+      lastPoint == null ||
+      drawingMode === "source" ||
+      drawingMode === "target"
+    ) {
       return;
     }
 
@@ -228,7 +242,7 @@ export default function DijkstraPathDrawer({
         cellsRef.current[y0][x0].status = drawingMode;
         drawCell(x0, y0, drawingMode);
       }
-      
+
       if (x0 === x1 && y0 === y1) break;
 
       const e2 = 2 * error;
@@ -243,45 +257,46 @@ export default function DijkstraPathDrawer({
         y0 += sy;
       }
     }
-    
+
     lastPosRef.current = point;
   }
 
-  function handlePointerUp(p0: unknown): void {
+  function handlePointerUp(_p0: unknown): void {
     setIsDrawing(false);
     lastPosRef.current = null;
   }
 
-  function handlePointerLeave(p0: unknown): void {
+  function handlePointerLeave(_p0: unknown): void {
     setIsDrawing(false);
   }
 
   /* ==== DIJKSTRA ALGORITHM LOGIC ==== */
   function dijkstraInitialization(): void {
-    // Reset visited and redraw
-    visitedRef.current?.forEach((row, y) => {
-      row.forEach((_, x) => {
-        if (visitedRef.current) visitedRef.current[y][x] = false;
+    if (visitedRef.current != null) {
+      visitedRef.current.forEach((row, y) => {
+        row.forEach((_, x) => {
+          if (visitedRef.current != null) visitedRef.current[y][x] = false;
+        });
       });
-    });
-    
+    }
+
     // Redraw the grid
-    cellsRef.current.forEach((row, y) => 
+    cellsRef.current.forEach((row, y) =>
       row.forEach((cell, x) => drawCell(x, y, cell.status))
     );
 
     // Early return if source or target is not set
-    if (!source || !target) return;
+    if (source == null || target == null) return;
 
     // Initialize algorithm structures
     const distances = Array(rows)
       .fill(null)
       .map(() => Array(cols).fill(Number.POSITIVE_INFINITY));
-    
+
     const visited = Array(rows)
       .fill(null)
       .map(() => Array(cols).fill(false));
-    
+
     const predecessors = Array(rows)
       .fill(null)
       .map(() => Array(cols).fill(null));
@@ -298,20 +313,19 @@ export default function DijkstraPathDrawer({
     // Initialize queue with source node
     dijkstraQueueRef.current = [{ x: source.x, y: source.y, dist: 0 }];
   }
-
   function dijkstraOneStep(): void {
-    if (!source || !target) return;
+    if (source == null || target == null) return;
 
     const distances = distancesRef.current;
     const visited = visitedRef.current;
     const predecessors = predecessorsRef.current;
     const cells = cellsRef.current;
     const queue = dijkstraQueueRef.current;
-    
+
     const { x: targetX, y: targetY } = target;
-    
+
     // If target is already visited, animate the path
-    if (visited[targetY][targetX]) {
+    if (target != null && visitedRef.current[target.y][target.x]) {
       animateShortestPath(source, target, predecessorsRef.current);
       return;
     }
@@ -324,24 +338,28 @@ export default function DijkstraPathDrawer({
       { dx: 0, dy: 1 },
     ];
 
-    // Process a chunk of cells based on the chunk size
+    // Process exactly one node when manually stepping
+    // or a chunk of cells when auto-running based on the chunk size
+    const maxSteps = dijkstraRunningRef.current
+      ? dijkstraChunkSizeRef.current
+      : 1;
     let count = 0;
-    while (count++ < dijkstraChunkSizeRef.current && queue.length > 0) {
+    while (count++ < maxSteps && queue.length > 0) {
       // Sort queue by distance (simulating a min-heap)
       queue.sort((a, b) => a.dist - b.dist);
-      
+
       // Get the node with smallest distance
       const current = queue.shift();
-      if (!current) break;
-      
+      if (current === undefined) break;
+
       const { x, y } = current;
-      
+
       // Skip if already visited
       if (visited[y][x]) continue;
-      
+
       // Mark as visited
       visited[y][x] = true;
-      
+
       // Update visualization (except for source/target)
       if (cells[y][x].status !== "source" && cells[y][x].status !== "target") {
         cells[y][x].status = "visited";
@@ -352,15 +370,16 @@ export default function DijkstraPathDrawer({
       for (const { dx, dy } of directions) {
         const nx = x + dx;
         const ny = y + dy;
-        
+
         // Check if neighbor is valid and not visited
         if (
           isInBounds(nx, ny) &&
           !visited[ny][nx] &&
-          (cells[ny][nx].status === "passage" || cells[ny][nx].status === "target")
+          (cells[ny][nx].status === "passage" ||
+            cells[ny][nx].status === "target")
         ) {
           const newDist = distances[y][x] + 1;
-          
+
           // Update distances if we found a better path
           if (newDist < distances[ny][nx]) {
             distances[ny][nx] = newDist;
@@ -385,28 +404,34 @@ export default function DijkstraPathDrawer({
     target: Point,
     predecessors: Point[][]
   ): void {
-    // Reconstruct path from target to source
     const path: Point[] = [];
-    let current = target;
-    
-    while (current) {
+    let current: Point | null = target;
+
+    while (current != null) {
       path.push(current);
       if (current.x === source.x && current.y === source.y) break;
       current = predecessors[current.y][current.x];
     }
 
-    // Animate the path reconstruction
-    let i = 1; // Skip the target node (first in path)
-    function step() {
-      if (i >= path.length - 1) return; // Skip the source node (last in path)
-      
+    // Update path found status and length
+    setPathFound(true);
+    setPathLength(path.length - 2); // Subtract source and target nodes
+
+    let i = 1;
+    shortestPathAnimatingRef.current = true;
+    function step(): void {
+      if (!shortestPathAnimatingRef.current) return;
+      if (i >= path.length - 1) {
+        shortestPathAnimatingRef.current = false;
+        return;
+      }
       const { x, y } = path[i++];
       cellsRef.current[y][x].status = "shortestPath";
       drawCell(x, y, "shortestPath");
-      
+
       requestAnimationFrame(step);
     }
-    
+
     requestAnimationFrame(step);
   }
 
@@ -418,12 +443,12 @@ export default function DijkstraPathDrawer({
     }
 
     if (dijkstraRunningRef.current) return;
-    
+
     dijkstraRunningRef.current = true;
     setDijkstraRunning(true);
     setDijkstraPaused(false);
     setDijkstraChunkSize((cols + rows) / 16);
-    
+
     dijkstraStepLoop();
   }
 
@@ -436,16 +461,16 @@ export default function DijkstraPathDrawer({
 
   function dijkstraStepLoop(): void {
     if (!dijkstraRunningRef.current) return;
-    
+
     dijkstraOneStep();
-    
+
     // Check if finished (target visited)
-    if (target && visitedRef.current[target.y][target.x]) {
+    if (target != null && visitedRef.current[target.y][target.x]) {
       dijkstraRunningRef.current = false;
       setDijkstraRunning(false);
       return;
     }
-    
+
     requestAnimationFrame(dijkstraStepLoop);
   }
 
@@ -456,7 +481,17 @@ export default function DijkstraPathDrawer({
     setTarget(null);
     setDrawingMode("blocked");
     setIsDrawing(false);
-    
+    setPathFound(false);
+    setPathLength(0);
+    shortestPathAnimatingRef.current = false;
+    cellsRef.current.forEach((row, y) => {
+      row.forEach((cell, x) => {
+        if (cell.status === "visited" || cell.status === "shortestPath") {
+          cell.status = "passage";
+          drawCell(x, y, "passage");
+        }
+      });
+    });
     // Initialize blank grid
     const blankGrid: Cell[][] = Array.from({ length: rows }, () =>
       Array.from({ length: cols }, () => ({ status: "passage" }))
@@ -464,18 +499,18 @@ export default function DijkstraPathDrawer({
     cellsRef.current = blankGrid;
 
     // Reset algorithm data structures
-    distancesRef.current = Array(rows).fill(null).map(() => 
-      Array(cols).fill(Number.POSITIVE_INFINITY)
-    );
-    
-    visitedRef.current = Array(rows).fill(null).map(() => 
-      Array(cols).fill(false)
-    );
-    
-    predecessorsRef.current = Array(rows).fill(null).map(() => 
-      Array(cols).fill({ x: -1, y: -1 })
-    );
-    
+    distancesRef.current = Array(rows)
+      .fill(null)
+      .map(() => Array(cols).fill(Number.POSITIVE_INFINITY));
+
+    visitedRef.current = Array(rows)
+      .fill(null)
+      .map(() => Array(cols).fill(false));
+
+    predecessorsRef.current = Array(rows)
+      .fill(null)
+      .map(() => Array(cols).fill({ x: -1, y: -1 }));
+
     // Redraw grid
     blankGrid.forEach((row, y) =>
       row.forEach((_, x) => drawCell(x, y, "passage"))
@@ -487,7 +522,9 @@ export default function DijkstraPathDrawer({
     dijkstraRunningRef.current = false;
     setDijkstraRunning(false);
     setDijkstraPaused(false);
-    dijkstraQueueRef.current = [];
+    shortestPathAnimatingRef.current = false;
+    setPathFound(false);
+    setPathLength(0);
 
     // Clear visualization
     cellsRef.current.forEach((row, y) => {
@@ -500,40 +537,57 @@ export default function DijkstraPathDrawer({
     });
 
     // Restore source and target
-    if (source) {
+    if (source != null) {
       cellsRef.current[source.y][source.x].status = "source";
       drawCell(source.x, source.y, "source");
     }
 
-    if (target) {
+    if (target != null) {
       cellsRef.current[target.y][target.x].status = "target";
       drawCell(target.x, target.y, "target");
     }
 
     // Reset algorithm data structures
-    visitedRef.current = Array(rows).fill(null).map(() => Array(cols).fill(false));
-    distancesRef.current = Array(rows).fill(null).map(() => Array(cols).fill(Number.POSITIVE_INFINITY));
-    predecessorsRef.current = Array(rows).fill(null).map(() => Array(cols).fill(null));
+    visitedRef.current = Array(rows)
+      .fill(null)
+      .map(() => Array(cols).fill(false));
+    distancesRef.current = Array(rows)
+      .fill(null)
+      .map(() => Array(cols).fill(Number.POSITIVE_INFINITY));
+    predecessorsRef.current = Array(rows)
+      .fill(null)
+      .map(() => Array(cols).fill(null));
+
+    // Re-initialize the algorithm after clearing
+    if (source != null && target != null) {
+      // Set source distance to zero
+      if (source) {
+        distancesRef.current[source.y][source.x] = 0;
+      }
+
+      // Re-initialize queue with source node
+      dijkstraQueueRef.current = source
+        ? [{ x: source.x, y: source.y, dist: 0 }]
+        : [];
+    } else {
+      dijkstraQueueRef.current = [];
+    }
   }
 
   /* ==== HTML OVERLAY POSITIONING ==== */
   function setHTMLOverlayToCanvas(point: Point, element: HTMLElement): void {
-    const canvas = canvasRef.current!;
-    const container = canvas.parentElement!;
+    const canvas = canvasRef.current;
+    if (canvas == null) return;
+    const container = canvas.parentElement;
+    if (container == null) return;
     const canvasRect = canvas.getBoundingClientRect();
-    
     const cellW = canvasRect.width / cols;
     const cellH = canvasRect.height / rows;
-    
-    const offsetX = canvas.clientLeft + parseFloat(getComputedStyle(container).paddingLeft);
-    const offsetY = canvas.clientTop + parseFloat(getComputedStyle(container).paddingTop);
-    
-    const left = offsetX + point.x * cellW + cellW / 2;
-    const top = offsetY + point.y * cellH;
-    
+    const left = Math.round(point.x * cellW + cellW / 2);
+    const top = Math.round(point.y * cellH);
+
     element.style.left = `${left}px`;
     element.style.top = `${top}px`;
-    element.style.transform = `translate(-50%, -100%)`;
   }
 
   /* ==== EFFECTS ==== */
@@ -544,199 +598,233 @@ export default function DijkstraPathDrawer({
 
   // Initialize Dijkstra when source or target changes
   useEffect(() => {
-    if (source && target) {
+    if (source != null && target != null) {
       dijkstraInitialization();
     }
   }, [source, target]);
 
   // Handle window resizing
   useEffect(() => {
-    function handleResize() {
+    function handleResize(): void {
       setDimensions({
         width: window.innerWidth,
         height: window.innerHeight,
       });
     }
-    
+
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
   // Position source node tooltip
   useEffect(() => {
-    if (!source) return;
-    
-    const sourceElement = document.querySelector(".dijkstra-source-node") as HTMLElement;
-    if (sourceElement) {
+    if (source == null) return;
+
+    const sourceElement = document.querySelector(".dijkstra-source-node");
+    if (sourceElement instanceof HTMLElement) {
       setHTMLOverlayToCanvas(source, sourceElement);
     }
   }, [dimensions, source]);
 
   // Position target node tooltip
   useEffect(() => {
-    if (!target) return;
-    
-    const targetElement = document.querySelector(".dijkstra-target-node") as HTMLElement;
-    if (targetElement) {
+    if (target == null) return;
+
+    const targetElement = document.querySelector(".dijkstra-target-node");
+    if (targetElement instanceof HTMLElement) {
       setHTMLOverlayToCanvas(target, targetElement);
     }
   }, [dimensions, target]);
 
   return (
     <>
-      <div className="mockup-window bg-base-200 shadow-lg overflow-hidden">
-        <div className="pl-11 pr-11">
-          <div className="flex-col items-center">
-            <div className="flex flex-col justify-center w-full mb-2 gap-2">
-              {/* Algorithm control buttons */}
-              <div className="join join-horizontal flex justify-center">
-                <button
-                  className="btn btn-primary join-item"
-                  disabled={!source || !target}
-                  onMouseDown={() => dijkstraOneStep()}
-                >
-                  One Step Dijkstra
-                </button>
-                <button
-                  className="btn btn-primary join-item w-32"
-                  disabled={!source || !target}
-                  onClick={dijkstraRunning ? dijkstraStop : dijkstraPlay}
-                >
-                  {dijkstraRunning ? "Stop Dijkstra" : "Play Dijkstra"}
-                </button>
-              </div>
-
-              {/* Drawing mode buttons */}
-              <div className="join join-horizontal flex justify-center">
-                <button
-                  className="btn btn-primary join-item"
-                  onClick={() => setDrawingMode("blocked")}
-                >
-                  Wall
-                  <svg viewBox="0 0 1 1" className="w-3 h-3 ml-2">
-                    <rect
-                      x="0"
-                      y="0"
-                      width="1"
-                      height="1"
-                      fill={getVar("--color-base-200")}
-                      fillOpacity={drawingMode === "blocked" ? 1 : 0.25}
-                    />
-                  </svg>
-                </button>
-                <button
-                  className="btn btn-primary join-item"
-                  onClick={() => setDrawingMode("passage")}
-                >
-                  Erase
-                  <svg viewBox="0 0 1 1" className="w-3 h-3 ml-2">
-                    <rect
-                      x="0"
-                      y="0"
-                      width="1"
-                      height="1"
-                      fill={getVar("--color-base-content")}
-                      fillOpacity={drawingMode === "passage" ? 1 : 0.25}
-                    />
-                  </svg>
-                </button>
-                <button
-                  className="btn btn-primary join-item"
-                  onClick={() => setDrawingMode("source")}
-                >
-                  Source
-                  <svg viewBox="0 0 1 1" className="w-3 h-3 ml-2">
-                    <rect
-                      x="0"
-                      y="0"
-                      width="1"
-                      height="1"
-                      fill={getVar("--color-error")}
-                      fillOpacity={drawingMode === "source" ? 1 : 0.25}
-                    />
-                  </svg>
-                </button>
-                <button
-                  className="btn btn-primary join-item"
-                  onClick={() => setDrawingMode("target")}
-                >
-                  Target
-                  <svg viewBox="0 0 1 1" className="w-3 h-3 ml-2">
-                    <rect
-                      x="0"
-                      y="0"
-                      width="1"
-                      height="1"
-                      fill={getVar("--color-info")}
-                      fillOpacity={drawingMode === "target" ? 1 : 0.25}
-                    />
-                  </svg>
-                </button>
-              </div>
-
-              {/* Canvas container */}
-              <div className="flex justify-center items-center w-full">
-                <div className="w-[750px]  mx-auto flex justify-center items-center relative">
-                  <canvas
-                    ref={canvasRef}
-                    className="w-full select-none cursor-pointer touch-none rounded-3xl"
-                    style={{ imageRendering: "pixelated" }}
-                    onMouseDown={handlePointerDown}
-                    onMouseUp={handlePointerUp}
-                    onMouseMove={handlePointerMove}
-                    onMouseLeave={handlePointerLeave}
-                    onTouchStart={(e) => {
-                      handlePointerDown(
-                        e.touches[0] as unknown as React.PointerEvent<HTMLCanvasElement>
-                      );
-                    }}
-                    onTouchEnd={(e) => {
-                      handlePointerUp(
-                        e.changedTouches[0] as unknown as React.PointerEvent<HTMLCanvasElement>
-                      );
-                    }}
-                    onTouchMove={(e) => {
-                      handlePointerMove(
-                        e.touches[0] as unknown as React.PointerEvent<HTMLCanvasElement>
-                      );
-                    }}
-                    onTouchCancel={(e) => {
-                      handlePointerLeave(
-                        e.changedTouches[0] as unknown as React.PointerEvent<HTMLCanvasElement>
-                      );
-                    }}
+      <div>
+        <div className="flex flex-col items-center">
+          <div className="mb-2 flex w-full flex-col justify-center gap-2">
+            {/* Algorithm control buttons */}
+            <div className="join join-horizontal flex justify-center">
+              <button
+                className="join-item btn btn-primary"
+                disabled={source == null || target == null}
+                onMouseDown={() => dijkstraOneStep()}
+                title="Run a single step of Dijkstra's algorithm"
+              >
+                One Step Dijkstra
+              </button>
+              <button
+                className="join-item btn btn-primary w-32"
+                disabled={source == null || target == null}
+                onClick={dijkstraRunning ? dijkstraStop : dijkstraPlay}
+                title={
+                  dijkstraRunning
+                    ? "Stop the algorithm"
+                    : "Run Dijkstra's algorithm automatically"
+                }
+              >
+                {dijkstraRunning ? "Stop Dijkstra" : "Play Dijkstra"}
+              </button>
+            </div>
+            {/* Drawing mode buttons */}
+            <div className="join join-horizontal flex justify-center">
+              <button
+                className="join-item btn btn-primary"
+                onClick={() => setDrawingMode("blocked")}
+              >
+                Wall
+                <svg viewBox="0 0 1 1" className="ml-2 size-3">
+                  <rect
+                    x="0"
+                    y="0"
+                    width="1"
+                    height="1"
+                    fill={getVar("--color-base-200")}
+                    fillOpacity={drawingMode === "blocked" ? 1 : 0.25}
                   />
-                  {source && (
-                    <div
-                      className="dijkstra-source-node tooltip tooltip-open tooltip-top opacity-80 absolute tooltip-error font-bold"
-                      data-tip="Source Node"
-                    />
+                </svg>
+              </button>
+              <button
+                className="join-item btn btn-primary"
+                onClick={() => setDrawingMode("passage")}
+              >
+                Erase
+                <svg viewBox="0 0 1 1" className="ml-2 size-3">
+                  <rect
+                    x="0"
+                    y="0"
+                    width="1"
+                    height="1"
+                    fill={getVar("--color-base-100")}
+                    fillOpacity={drawingMode === "passage" ? 1 : 0.25}
+                  />
+                </svg>
+              </button>
+              <button
+                className="join-item btn btn-primary"
+                onClick={() => setDrawingMode("source")}
+              >
+                Source
+                <svg viewBox="0 0 1 1" className="ml-2 size-3">
+                  <rect
+                    x="0"
+                    y="0"
+                    width="1"
+                    height="1"
+                    fill={getVar("--color-error")}
+                    fillOpacity={drawingMode === "source" ? 1 : 0.25}
+                  />
+                </svg>
+              </button>
+              <button
+                className="join-item btn btn-primary"
+                onClick={() => setDrawingMode("target")}
+              >
+                Target
+                <svg viewBox="0 0 1 1" className="ml-2 size-3">
+                  <rect
+                    x="0"
+                    y="0"
+                    width="1"
+                    height="1"
+                    fill={getVar("--color-success")}
+                    fillOpacity={drawingMode === "target" ? 1 : 0.25}
+                  />
+                </svg>
+              </button>
+            </div>
+            {/* Canvas container */}
+            <div className="flex w-full items-center justify-center">
+              <div className="relative mx-auto flex w-[700px] items-center justify-center">
+                <canvas
+                  ref={canvasRef}
+                  className="w-full cursor-pointer touch-none select-none rounded-3xl border-4 border-primary border-dashed shadow-md"
+                  style={{ imageRendering: "pixelated" }}
+                  onMouseDown={handlePointerDown}
+                  onMouseUp={handlePointerUp}
+                  onMouseMove={handlePointerMove}
+                  onMouseLeave={handlePointerLeave}
+                  onTouchStart={(e) => {
+                    handlePointerDown(
+                      e
+                        .touches[0] as unknown as React.PointerEvent<HTMLCanvasElement>
+                    );
+                  }}
+                  onTouchEnd={(e) => {
+                    handlePointerUp(
+                      e
+                        .changedTouches[0] as unknown as React.PointerEvent<HTMLCanvasElement>
+                    );
+                  }}
+                  onTouchMove={(e) => {
+                    handlePointerMove(
+                      e
+                        .touches[0] as unknown as React.PointerEvent<HTMLCanvasElement>
+                    );
+                  }}
+                  onTouchCancel={(e) => {
+                    handlePointerLeave(
+                      e
+                        .changedTouches[0] as unknown as React.PointerEvent<HTMLCanvasElement>
+                    );
+                  }}
+                />
+                {source != null && (
+                  <div
+                    className="dijkstra-source-node tooltip tooltip-top tooltip-open tooltip-error absolute font-bold opacity-80"
+                    data-tip="Source Node"
+                  />
+                )}
+                {target != null && (
+                  <div
+                    className="dijkstra-target-node tooltip tooltip-top tooltip-open tooltip-success absolute font-bold opacity-80"
+                    data-tip="Target Node"
+                  />
+                )}
+                <div className="bg-transparent text-center font-bold">
+                  {source === null && (
+                    <div className="absolute left-1/2 top-1 -translate-x-1/2 rounded-lg bg-error/40 px-3 py-1 mt-2 text-sm shadow-md">
+                      Select "Source" and click on the grid to place a source
+                      node. Also add walls to make the pathfinding more interesting.
+                    </div>
                   )}
-                  {target && (
-                    <div
-                      className="dijkstra-target-node tooltip tooltip-open tooltip-top opacity-80 absolute tooltip-info font-bold"
-                      data-tip="Target Node"
-                    />
+                  {source !== null && target === null && (
+                    <div className="absolute left-1/2 top-1 -translate-x-1/2 rounded-lg bg-success/40 px-3 py-1 mt-2 text-sm shadow-md">
+                      Select "Target" and click on the grid to place a target
+                      node
+                    </div>
                   )}
+                  {source !== null && target !== null && dijkstraRunning && (
+                    <div className="absolute left-1/2 top-1 -translate-x-1/2 rounded-lg bg-primary/40 px-3 py-1 mt-2 text-sm shadow-md">
+                      Dijkstra's algorithm running...
+                    </div>
+                  )}
+                  {source !== null &&
+                    target !== null &&
+                    !dijkstraRunning &&
+                    pathFound && (
+                      <div className="absolute left-1/2 top-1 -translate-x-1/2 rounded-lg bg-secondary/40 px-3 py-1 mt-2 text-sm shadow-md">
+                        Path found! Length: {pathLength}
+                      </div>
+                    )}
                 </div>
               </div>
-
-              {/* Clear buttons */}
-              <div className="flex justify-center items-center join join-horizontal">
-                <button
-                  className="btn btn-primary join-item"
-                  onClick={clearMaze}
-                >
-                  Clear All
-                </button>
-                <button
-                  className="btn btn-primary join-item"
-                  disabled={!source || !target}
-                  onClick={clearDijkstraResults}
-                >
-                  Clear Dijkstra
-                </button>
-              </div>
+            </div>
+            {/* Clear buttons */}
+            <div className="join join-horizontal flex items-center justify-center">
+              <button
+                className="join-item btn btn-primary"
+                onClick={clearMaze}
+                title="Clear the entire grid and all algorithm results"
+              >
+                Clear All
+              </button>
+              <button
+                className="join-item btn btn-primary"
+                disabled={source == null || target == null}
+                onClick={clearDijkstraResults}
+                title="Clear only the algorithm results, preserving walls and source/target"
+              >
+                Clear Dijkstra
+              </button>
             </div>
           </div>
         </div>

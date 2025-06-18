@@ -1,7 +1,6 @@
-import DijkstraPathDrawer from "../../components/Pathfinding/DijsktraPathDrawer";
-import React, { useEffect, useRef, useState } from "react";
+import { useRef, useEffect, useState } from "react";
 
-export default function DijkstraPage() {
+export default function HomePage({ children }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [cellSize, setCellSize] = useState(100);
 
@@ -12,8 +11,15 @@ export default function DijkstraPage() {
     ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
   };
 
+
   function getRandomColor(): string {
-    const colors = ["orange", "red", "gray", "#B6F500", "#37E2D5"];
+    const colors = [
+      "orange",
+      "red",
+      "gray",
+      "#B6F500",
+      "#37E2D5",
+    ];
     return colors[Math.floor(Math.random() * colors.length)];
   }
 
@@ -102,11 +108,10 @@ export default function DijkstraPage() {
           style={{ imageRendering: "pixelated" }}
         />
       </div>
-
+      
       {/* Content Overlay */}
       <div className="relative flex justify-center items-center h-screen">
-
-          <DijkstraPathDrawer cols={111} rows={111} />
+        {children}
       </div>
     </div>
   );

@@ -1,9 +1,12 @@
 import KruskalMazeGeneration from "../../components/MinimumSpanningTree/KruskalMazeGenerator";
+import Background from "../../components/AppLayout/BackGround";
 
 export default function KruskalPage() {
   return (
     <>
-      <KruskalMazeGeneration />
+      <Background>
+        <KruskalMazeGeneration />
+      </Background>
     </>
   );
 }
