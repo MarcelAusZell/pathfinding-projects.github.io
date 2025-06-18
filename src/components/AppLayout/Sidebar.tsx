@@ -6,7 +6,7 @@ export default function Sidebar(): React.JSX.Element {
     <>
       <div className="drawer-side font-semibold shadow-md">
         <label htmlFor="my-drawer" className="drawer-overlay"></label>
-        <ul className="menu min-h-full w-80 bg-base-200 p-4 text-base-content">
+        <ul className="menu min-h-full w-80 bg-base-200/85 p-4 text-base-content">
           <li>
             <NavLink
               to="/"
